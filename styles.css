@@ -30,3 +30,13 @@ nav{background:#101113f0;border-color:#303136}
 .donut-center{height:138px;width:138px;background:#151619;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px}
 .donut-center small{color:#9b9b9b;font-size:11px}.donut-center strong{font-size:20px}
 @media(max-width:370px){.day{min-height:67px}.day .amt{font-size:8px}}
+
+/* v5: monochrome Google sign-in */
+.authcard{background:#141517;border:1px solid #303136;padding:30px 25px;text-align:center;box-shadow:0 24px 90px #0007}
+.authcard small{display:block;text-align:left}.authcard h1{text-align:left;margin-bottom:30px}
+.google-auth-symbol{height:68px;width:68px;border:1px solid #5b5c62;border-radius:20px;margin:12px auto 22px;display:grid;place-items:center;font-size:37px;font-weight:750;letter-spacing:-.1em;background:#222326}
+.authcard h2{font-size:19px;margin:10px 0 14px}.authcard .muted{line-height:1.9}
+.google-login{display:flex;justify-content:center;align-items:center;gap:13px;width:100%;margin-top:28px;border:0;border-radius:13px;padding:16px 12px;background:#f7f7f7;color:#111;font-size:15px;font-weight:700;cursor:pointer}
+.google-login:disabled{opacity:.5;cursor:wait}.google-login:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.auth-footnote{font-size:11px;color:#7f8087;margin:24px 0 0}
+#authStatus:not(:empty){margin-top:16px}

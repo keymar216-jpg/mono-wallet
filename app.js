@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInAnonymously, createUserWithEmailAndPassword, signInWithEmailAndPassword, EmailAuthProvider, linkWithCredential, signOut } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
+import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc, getDoc, getDocsFromServer } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 const $ = id => document.getElementById(id);
@@ -35,16 +35,63 @@ function bars(target,items){const max=Math.max(1,...items.map(i=>i.value));$(tar
 function renderAnalytics(){const p=periodFor(new Date()),d=currentData(p),groups={};d.rows.forEach(e=>groups[e.category]=(groups[e.category]||0)+Number(e.amount));const items=Object.entries(groups).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);bars('categoryChart',items);bars('methodChart',[{name:'クレカ',value:d.credit},{name:'現金',value:d.cash}]);$('analyticsIncome').textContent=yen(d.income);$('analyticsExpense').textContent=yen(d.total);$('analyticsBalance').textContent=(d.balance>0?'+':'')+yen(d.balance);$('donutTotal').textContent=yen(d.total);const shades=['#f5f5f5','#bdbdbd','#878787','#626262','#454545','#303030','#d8d8d8','#999999'];let angle=0;const stops=items.map((x,i)=>{const start=angle;angle+=d.total?x.value/d.total*100:0;return `${shades[i%shades.length]} ${start}% ${angle}%`;});document.querySelector('.donut').style.background=d.total?`conic-gradient(${stops.join(',')})`:'#2a2a2a';const hist=[];for(let i=5;i>=0;i--){const date=addMonths(new Date(),-i),per=periodFor(date),v=currentData(per);hist.push({name:`${per.start.getMonth()+1}/${per.start.getDate()}`,value:v.total});}bars('historyChart',hist);}
 function renderSettings(){$('cycleDay').value=String(state.prefs.cycleDay||1);$('categoryList').innerHTML=state.categories.map(c=>`<div class="listrow"><span>${escapeHtml(c.name)}</span><div><button data-rename-cat="${escapeHtml(c.id)}">編集</button><button data-delete-cat="${escapeHtml(c.id)}">削除</button></div></div>`).join('');$('fixedList').innerHTML=state.fixed.length?state.fixed.map(f=>`<div class="listrow"><span>${escapeHtml(f.name)} · ${yen(f.amount)} · 毎月${f.day}日 · ${f.method==='cash'?'現金':'クレカ'}</span><button data-delete-fixed="${escapeHtml(f.id)}">削除</button></div>`).join(''):'<p class="empty">固定費は未設定です。</p>';}
 async function applyFixed(){if(state.syncing||!Object.values(state.ready).every(Boolean))return;state.syncing=true;try{const now=new Date(),months=[addMonths(now,-1),new Date(now.getFullYear(),now.getMonth(),1)];for(const f of state.fixed){for(const mo of months){const when=clampedDate(mo.getFullYear(),mo.getMonth(),Number(f.day));if(when>now)continue;const id=`fixed_${f.id}_${monthKey(mo)}`;if(state.expenses.some(e=>e.id===id))continue;const ref=userDoc('expenses',id);if((await getDoc(ref)).exists())continue;await setDoc(ref,{amount:Number(f.amount),date:dateKey(when),category:f.category,method:f.method,note:f.name,fixedId:f.id,createdAt:Date.now()});}}}catch(e){notify('固定費の登録に失敗: '+e.message)}finally{state.syncing=false;}}
-function authMessage(e){const c=e?.code||'';return ({'auth/invalid-email':'メールアドレスを確認してください','auth/email-already-in-use':'このメールアドレスは登録済みです。ログインしてください','auth/weak-password':'パスワードは6文字以上にしてください','auth/invalid-credential':'メールアドレスまたはパスワードが違います','auth/operation-not-allowed':'Firebaseでメール/パスワード認証を有効にしてください','auth/network-request-failed':'ネットワーク接続を確認してください'})[c]||e.message||'認証エラー';}
+function authMessage(e){
+  const code=e?.code||'';
+  return ({
+    'auth/popup-closed-by-user':'Googleログインがキャンセルされました。',
+    'auth/cancelled-popup-request':'Googleログインがキャンセルされました。もう一度お試しください。',
+    'auth/popup-blocked':'ポップアップがブロックされました。ブラウザの設定で許可してください。',
+    'auth/unauthorized-domain':'Firebase Authenticationの承認済みドメインに、このサイトのドメインを追加してください。',
+    'auth/operation-not-allowed':'Firebase AuthenticationでGoogleログインを有効にしてください。',
+    'auth/network-request-failed':'ネットワーク接続を確認してください。',
+    'auth/account-exists-with-different-credential':'別のログイン方法で登録済みのアカウントです。',
+    'auth/unauthorized-continue-uri':'Firebaseの承認済みドメインを確認してください。'
+  })[code]||e?.message||'Googleログインに失敗しました。';
+}
 function stopListeners(){unsubscribers.forEach(fn=>fn());unsubscribers=[];state.ready={expenses:false,incomes:false,categories:false,fixed:false,bills:false,prefs:false};state.initializingCategories=false;}
-function updateAuthUI(user){$('authGate').hidden=!!user;$('app').hidden=!user;if(user){$('accountLabel').textContent=user.isAnonymous?'ゲスト（この端末のみ）':user.email;$('upgradeBox').hidden=!user.isAnonymous;$('logout').hidden=user.isAnonymous;} }
+function updateAuthUI(user){$('authGate').hidden=!!user;$('app').hidden=!user;if(user){$('accountLabel').textContent=user.email||'Googleアカウント';}}
 function subscribeUser(user){stopListeners();state.user=user;updateAuthUI(user);$('sync').textContent='同期中';for(const c of ['expenses','incomes','categories','fixed','bills','prefs']){const unsub=onSnapshot(userCollection(c),async snap=>{const data=snap.docs.map(x=>({id:x.id,...x.data()}));if(c==='prefs')state.prefs=data.find(x=>x.id==='main')||{cycleDay:1};else state[c]=data;state.ready[c]=true;if(c==='categories'&&!data.length&&Object.values(state.ready).every(Boolean)&&!state.initializingCategories){state.initializingCategories=true;try{for(const name of defaultCategories)await setDoc(userDoc('categories',crypto.randomUUID()),{name});}catch(e){notify(e.message);}}if(Object.values(state.ready).every(Boolean)){$('sync').textContent=snap.metadata.fromCache?'オフライン':'同期済み';render();if(c==='fixed'||c==='expenses')applyFixed();}},e=>{$('sync').textContent='同期エラー';notify(e.message);});unsubscribers.push(unsub);}}
-async function init(){if(!firebaseConfig.apiKey||firebaseConfig.apiKey==='YOUR_API_KEY'){$('authStatus').textContent='firebase-config.js を設定してください';return;}try{db=getFirestore(initializeApp(firebaseConfig));auth=getAuth();await setPersistence(auth,browserLocalPersistence);onAuthStateChanged(auth,user=>{if(!user){stopListeners();state.user=null;updateAuthUI(null);return;}if(state.user?.uid===user.uid){updateAuthUI(user);return;}subscribeUser(user);});}catch(e){$('authStatus').textContent=e.message;}}
-$('loginForm').onsubmit=async e=>{e.preventDefault();const email=$('loginEmail').value.trim(),password=$('loginPassword').value;try{await signInWithEmailAndPassword(auth,email,password);$('loginPassword').value='';}catch(err){$('authStatus').textContent=authMessage(err);}};
-$('register').onclick=async()=>{const email=$('loginEmail').value.trim(),password=$('loginPassword').value;try{await createUserWithEmailAndPassword(auth,email,password);$('loginPassword').value='';}catch(err){$('authStatus').textContent=authMessage(err);}};
-$('guest').onclick=async()=>{try{await signInAnonymously(auth);}catch(err){$('authStatus').textContent=authMessage(err);}};
-$('upgradeForm').onsubmit=async e=>{e.preventDefault();if(!auth.currentUser?.isAnonymous)return;const email=$('upgradeEmail').value.trim(),password=$('upgradePassword').value;try{await linkWithCredential(auth.currentUser,EmailAuthProvider.credential(email,password));$('upgradePassword').value='';updateAuthUI(auth.currentUser);notify('アカウントを登録しました。別端末からログインできます。');}catch(err){notify(authMessage(err));}};
-$('logout').onclick=async()=>{if(!confirm('ログアウトしますか？ 次回は同じメールアドレスでログインしてください。'))return;await signOut(auth);};
+async function init(){
+  if(!firebaseConfig.apiKey||firebaseConfig.apiKey==='YOUR_API_KEY'){
+    $('authStatus').textContent='firebase-config.js を設定してください';return;
+  }
+  try{
+    db=getFirestore(initializeApp(firebaseConfig));
+    auth=getAuth();
+    auth.languageCode='ja';
+    await setPersistence(auth,browserLocalPersistence);
+    onAuthStateChanged(auth,async user=>{
+      // 旧版のゲスト・メールログインはv5では利用しない。
+      if(user && !user.providerData.some(p=>p.providerId==='google.com')){
+        stopListeners();state.user=null;updateAuthUI(null);
+        $('authStatus').textContent='Googleアカウントでログインしてください。';
+        try{await signOut(auth);}catch(e){$('authStatus').textContent=authMessage(e);}
+        return;
+      }
+      if(!user){stopListeners();state.user=null;updateAuthUI(null);return;}
+      if(state.user?.uid===user.uid){updateAuthUI(user);return;}
+      subscribeUser(user);
+    },e=>{$('authStatus').textContent=authMessage(e);});
+  }catch(e){$('authStatus').textContent=authMessage(e);}
+}
+const googleProvider=new GoogleAuthProvider();
+googleProvider.setCustomParameters({prompt:'select_account'});
+$('googleLogin').onclick=async()=>{
+  const button=$('googleLogin');
+  if(!auth){$('authStatus').textContent='Firebaseの初期化を確認してください。';return;}
+  button.disabled=true;
+  $('authStatus').textContent='Googleに接続しています…';
+  try{
+    await signInWithPopup(auth,googleProvider);
+    $('authStatus').textContent='';
+  }catch(e){
+    $('authStatus').textContent=authMessage(e);
+  }finally{button.disabled=false;}
+};
+$('logout').onclick=async()=>{
+  if(!confirm('ログアウトしますか？ 次回はGoogleアカウントを選んでログインしてください。'))return;
+  try{await signOut(auth);}catch(e){notify(authMessage(e));}
+};
 let pullStart=null,pullActive=false,refreshing=false;
 async function refreshData(){if(refreshing||!state.user)return;refreshing=true;$('pullIndicator').textContent='更新中…';$('pullIndicator').classList.add('visible');try{await Promise.all(['expenses','incomes','categories','fixed','bills','prefs'].map(c=>getDocsFromServer(userCollection(c))));notify('最新のデータを取得しました');}catch(err){notify('更新できませんでした。通信状態を確認してください。');}finally{refreshing=false;pullActive=false;pullStart=null;setTimeout(()=>$('pullIndicator').classList.remove('visible'),500);}}
 document.addEventListener('touchstart',e=>{if(!state.user||document.querySelector('dialog[open]')||window.scrollY>3||e.target.closest('input,select,textarea'))return;pullStart=e.touches[0].clientY;pullActive=false;},{passive:true});
